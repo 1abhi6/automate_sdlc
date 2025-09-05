@@ -8,3 +8,5 @@
 8. 
 
 
+Improving Efficiency
+1. Send JSON only to LLM for generating outputs
