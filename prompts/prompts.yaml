@@ -1,53 +1,58 @@
 PROMPTS:
-  fix_code_after_code_review: |
-    You are an experienced Software Engineer tasked with updating code after a code review.  
-    You will receive the **original source code** along with **feedback from a code review**.  
-    Your task is to apply the feedback and return the revised code.  
+  fix_code_after_code_review:
+    description: "Prompt for applying feedback to original code"
+    variables:
+      original_code: "The original source code before review"
+      feedback: "The feedback text containing suggestions for improvement"
+    template: |
+      You are an experienced Software Engineer tasked with updating code after a code review.  
+      You will receive the **original source code** along with **feedback from a code review**.  
+      Your task is to apply the feedback and return the revised code.  
 
-    ---
+      ---
 
-    #### Input
-    - **Original Code:** The implementation before the review.  
-    - **Review Feedback:** A list of issues, improvements, or changes suggested during code review.  
+      #### Input
+      - **Original Code:** The implementation before the review.  
+      - **Review Feedback:** A list of issues, improvements, or changes suggested during code review.  
 
-    ---
+      ---
 
-    #### Instructions
-    1. Carefully read the feedback and identify all required changes.  
-    2. Apply each change to the original code while preserving its intended functionality.  
-    3. Ensure that the updated code:  
-      - Fixes the issues mentioned in the feedback.  
-      - Remains clean, modular, and maintainable.  
-      - Does not introduce new bugs or unnecessary complexity.  
-    4. Do **not** generate explanations, reasoning, or test cases.  
-    5. Return only the revised source code.  
+      #### Instructions
+      1. Carefully read the feedback and identify all required changes.  
+      2. Apply each change to the original code while preserving its intended functionality.  
+      3. Ensure that the updated code:  
+        - Fixes the issues mentioned in the feedback.  
+        - Remains clean, modular, and maintainable.  
+        - Does not introduce new bugs or unnecessary complexity.  
+      4. Do **not** generate explanations, reasoning, or test cases.  
+      5. Return only the revised source code.  
 
-    ---
+      ---
 
-    #### Output Format
-    - Provide the **updated code only** inside properly formatted code blocks.  
-    - If multiple files are required, clearly separate them with filenames as headers.  
+      #### Output Format
+      - Provide the **updated code only** inside properly formatted code blocks.  
+      - If multiple files are required, clearly separate them with filenames as headers.  
 
-    ---
+      ---
 
-    #### Example Output
+      #### Example Output
 
-    ```python
-    # utils.py
-    def process_data(items: list[int]) -> list[int]:
-        if not items:
-            return []
-        return [x * 2 for x in items]
+      ```python
+      # utils.py
+      def process_data(items: list[int]) -> list[int]:
+          if not items:
+              return []
+          return [x * 2 for x in items]
 
-    # main.py
-    from utils import process_data
+      # main.py
+      from utils import process_data
 
-    if __name__ == "__main__":
-        data = [1, 2, 3]
-        print(process_data(data))
+      if __name__ == "__main__":
+          data = [1, 2, 3]
+          print(process_data(data))
 
-    Original Code:
-    {{ original_code }}
+      Original Code:
+      {{ original_code }}
 
-    Feedback:
-    {{ feedback }}
+      Feedback:
+      {{ feedback }}

@@ -1,7 +1,6 @@
 import os
 import yaml
-from jinja2 import Template
-
+from jinja2 import Template, Environment, meta
 
 class PromptConfig:
     def __init__(self, config_file=None):
@@ -16,18 +15,29 @@ class PromptConfig:
             self.prompts = yaml.safe_load(f)
 
     def get_prompt(self, key: str, **kwargs) -> str:
-        """
-        Fetches a prompt by key and fills in dynamic values with Jinja2.
-        Example:
-            config.get_prompt(
-                "fix_code_after_code_review",
-                original_code="print('hi')",
-                feedback="Use logging instead of print"
-            )
-        """
-        raw_prompt = self.prompts["PROMPTS"].get(key)
-        if raw_prompt is None:
+        prompt_entry = self.prompts["PROMPTS"].get(key)
+        if prompt_entry is None:
             raise KeyError(f"Prompt '{key}' not found in config")
 
+        raw_prompt = prompt_entry["template"]
         template = Template(raw_prompt)
         return template.render(**kwargs)
+
+    def get_prompt_variables(self, key: str, with_description=False):
+        prompt_entry = self.prompts["PROMPTS"].get(key)
+        if prompt_entry is None:
+            raise KeyError(f"Prompt '{key}' not found in config")
+
+        raw_prompt = prompt_entry["template"]
+
+        # Extract variables from template
+        env = Environment()
+        parsed_content = env.parse(raw_prompt)
+        vars_in_template = meta.find_undeclared_variables(parsed_content)
+
+        if with_description:
+            descriptions = prompt_entry.get("variables", {})
+            return {var: descriptions.get(var, "No description provided")
+                    for var in vars_in_template}
+
+        return vars_in_template

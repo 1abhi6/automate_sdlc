@@ -8,5 +8,7 @@ prompt = config.get_prompt(
     feedback="Kar le bhai thoda change",
 )
 
-
+prompt_variables = config.get_prompt_variables("fix_code_after_code_review", with_description=True)
+print(prompt_variables)
+print("\n\n\n")
 print(prompt)
