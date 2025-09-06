@@ -1,11 +1,12 @@
 from langgraph.graph import StateGraph, START, END, add_messages
-from typing import TypedDict, Annotated
+from typing import TypedDict, Annotated, Literal, List, Optional
 from langchain_core.prompts import PromptTemplate
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
 from jsonschema import validate
+from pydantic import BaseModel, Field
 import json
 
 load_dotenv()
@@ -14,12 +15,28 @@ load_dotenv()
 model = ChatOpenAI(model="gpt-4o-mini")
 
 
+# Utility Functions
+def get_evaluator_schema(model):
+
+    class EvaluatorSchema(BaseModel):
+        status: Literal["approved", "feedback"]
+        feedback: Optional[List[str]] = None
+
+    structured_model = model.with_structured_output(EvaluatorSchema)
+
+    return structured_model
+
+
+# State
 class SDLCState(TypedDict):
     user_input_requirements: str
     auto_generated_user_stories_markdown: Annotated[list[str], add_messages]
     design_docs: Annotated[list[str], add_messages]
     code: str
+    code_review_response: str
 
+
+# Node Defination
 def auto_generated_user_stories(state: SDLCState):
     prompt_template = PromptTemplate(
         template="""
@@ -165,7 +182,7 @@ def create_design_docs(state: SDLCState):
     response = design_docs_chain.invoke(
         {"user_story": state["auto_generated_user_stories_markdown"]}
     )
-    
+
     print("\n\nI AM FROM DESIGN_DOCS(): \n\n", response, "\n\n")
     return {"design_docs": response}
 
@@ -207,6 +224,72 @@ def generate_code(state: SDLCState):
     return {"code": response.content}
 
 
+def code_review(state: SDLCState):
+    prompt_template = PromptTemplate(
+        template="""
+            You are acting as a Senior Software Engineer performing a code review.  
+            Your task is to carefully evaluate the provided source code against the design requirements and best practices.  
+
+            ### Input
+            You will receive:
+            - Source code generated from the approved design documents.  
+            - Functional and Technical Requirements (FRs & TRs) that the code should implement.  
+
+            ### Review Instructions
+            When reviewing the code, check for the following aspects:
+
+            1. Correctness  
+            - Does the code correctly implement the functional and technical requirements?  
+            - Are all functional flows handled as expected?  
+
+            2. Code Quality  
+            - Is the code clean, readable, and maintainable?  
+            - Are naming conventions and coding standards followed?  
+            - Is the logic modular and reusable (avoiding duplication)?  
+
+            3. Error Handling & Reliability  
+            - Are errors and exceptions handled gracefully?  
+            - Is input validation included where necessary?  
+
+            4. Performance & Maintainability  
+            - Is the code efficient and reasonably optimized?  
+            - Could the code be refactored for better maintainability?  
+
+            ### Output Format
+            Respond in one of the following ways **only**:
+
+            - If the code is fully correct and ready → "approved"
+            - If the code requires changes →  feedback 
+                - [list each issue clearly and concisely in bullet points]
+
+
+            ### Example Outputs
+
+            **Approved case:**  
+            "approved"
+
+
+            **Feedback case:**  
+            feedback:
+                - Function process_data() does not handle empty input lists.
+                - Variable names like tmp and val should be more descriptive.
+                - Missing try/except for database connection.
+                
+        Code:
+        \n\n {code}
+        """,
+        input_variables=["code"],
+    )
+
+    structured_llm = get_evaluator_schema(model)
+
+    code_review_chain = prompt_template | structured_llm
+
+    response = code_review_chain.invoke({"code": state["code"]})
+
+    return {"code_review_response": response}
+
+
 # THIS GRAPH IS USED FOR TESTING
 
 graph = StateGraph(SDLCState)
@@ -214,11 +297,13 @@ graph = StateGraph(SDLCState)
 graph.add_node("auto_generated_user_stories", auto_generated_user_stories)
 graph.add_node("create_design_docs", create_design_docs)
 graph.add_node("generate_code", generate_code)
+graph.add_node("code_review", code_review)
 
 graph.add_edge(START, "auto_generated_user_stories")
 graph.add_edge("auto_generated_user_stories", "create_design_docs")
 graph.add_edge("create_design_docs", "generate_code")
-graph.add_edge("generate_code", END)
+graph.add_edge("generate_code", "code_review")
+graph.add_edge("code_review", END)
 
 workflow = graph.compile()
 
