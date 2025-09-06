@@ -7,9 +7,11 @@ from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
 from jsonschema import validate
 from pydantic import BaseModel, Field
+from prompts.prompts_config import PromptConfig
 import json
 
 load_dotenv()
+config=PromptConfig()
 
 # model = ChatGroq(model="llama-3.1-8b-instant")
 model = ChatOpenAI(model="gpt-4o-mini")
@@ -38,69 +40,17 @@ class SDLCState(TypedDict):
 
 # Node Defination
 def auto_generated_user_stories(state: SDLCState):
-    prompt_template = PromptTemplate(
-        template="""
-         You are an expert Agile Product Owner and Business Analyst. 
-         Your task is to generate high-quality, clear, and structured *user stories* from the given software requirements.  
-
-         ### Input
-         You will receive:
-         - A description of user requirements (provided by the user).
-         - The project context, if available.
-
-         ### Instructions
-         1. Break down the given requirements into **user stories** following the Agile format:  
-            *As a [role], I want [feature] so that [benefit]*.
-            
-         2. Ensure that each user story:
-            - Captures a single functionality or feature.  
-            - Clearly identifies the **user role** (end-user, admin, developer, etc.).  
-            - Describes the **action or feature** in simple language.  
-            - States the **value or outcome** of the feature.  
-
-         3. For each user story, provide:  
-            - **User Story ID** (US-1, US-2, …)  
-            - **Story Statement** (in Agile format)  
-            - **Acceptance Criteria** (written as Given/When/Then or bullet points)  
-            - **Priority** (High, Medium, Low)  
-            - **Dependencies** (if any)  
-
-         4. If requirements are ambiguous or incomplete:
-            - Highlight unclear areas in a separate section called **Clarification Questions**.  
-
-         ### Output Format
-         Return the output in **well-structured Markdown** with the following sections:  
-         - **User Stories** (list each with ID, statement, acceptance criteria, priority, dependencies)  
-         - **Clarification Questions** (if needed)  
-
-         ### Example
-         **User Story (US-1):**  
-         As a registered user, I want to reset my password so that I can regain access to my account when I forget it.  
-
-         **Acceptance Criteria:**  
-         - Given that the user is on the login page, when they click "Forgot Password", then they should be prompted to enter their email.  
-         - An email with a reset link should be sent.  
-         - The reset link should expire after 24 hours.  
-
-         **Priority:** High  
-         **Dependencies:** Email service setup  
-
-         ---
-         
-         User Input: \n {user_input}
-         
-         ---
-
-         Now, based on the provided requirements, generate a complete set of user stories.
-   """,
-        input_variables=["user_input"],
+    prompt = config.get_prompt(
+        "auto_generated_user_stories",
+        user_input= state["user_input_requirements"]
     )
+    
+    print("\n\n")
+    print(prompt)
+    print("\n\n")
+    user_story_chain = model | StrOutputParser()
 
-    user_story_chain = prompt_template | model | StrOutputParser()
-
-    markdown_response = user_story_chain.invoke(
-        {"user_input": state["user_input_requirements"]}
-    )
+    markdown_response = user_story_chain.invoke(prompt)
 
     return {"auto_generated_user_stories_markdown": markdown_response}
 
