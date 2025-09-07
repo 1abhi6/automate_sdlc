@@ -1,25 +1,23 @@
-from langgraph.graph import StateGraph, START, END, add_messages
-from typing import TypedDict, Annotated, Literal, List, Optional
-from langchain_core.prompts import PromptTemplate
-from langchain_groq import ChatGroq
-from langchain_openai import ChatOpenAI
+from typing import Annotated, List, Literal, Optional, TypedDict
+
 from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
-from jsonschema import validate
-from pydantic import BaseModel, Field
+from langchain_core.prompts import PromptTemplate
+from langchain_groq import ChatGroq
+from langgraph.graph import END, START, StateGraph, add_messages
+from pydantic import BaseModel
+
 from prompts.prompts_config import PromptConfig
-import json
 
 load_dotenv()
-config=PromptConfig()
+config = PromptConfig()
 
-# model = ChatGroq(model="llama-3.1-8b-instant")
-model = ChatOpenAI(model="gpt-4o-mini")
+model = ChatGroq(model="llama-3.1-8b-instant")
+# model = ChatOpenAI(model="gpt-4o-mini")
 
 
 # Utility Functions
 def get_evaluator_schema(model):
-
     class EvaluatorSchema(BaseModel):
         status: Literal["approved", "feedback"]
         feedback: Optional[List[str]] = None
@@ -41,10 +39,9 @@ class SDLCState(TypedDict):
 # Node Defination
 def auto_generated_user_stories(state: SDLCState):
     prompt = config.get_prompt(
-        "auto_generated_user_stories",
-        user_input= state["user_input_requirements"]
+        "auto_generated_user_stories", user_input=state["user_input_requirements"]
     )
-    
+
     print("\n\n")
     print(prompt)
     print("\n\n")
