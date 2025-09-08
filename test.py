@@ -16,7 +16,6 @@ based on reviewer feedback.
 
 Author: Ahbishek Gupta
 Created: 05 Sept 2025
-Updated: Added counter-based iteration control for code review cycles
 """
 
 from typing import Annotated, List, Literal, Optional, TypedDict
@@ -33,6 +32,9 @@ from prompts.prompts_config import PromptConfig
 # Load environment variables from .env file
 load_dotenv()
 config = PromptConfig()
+
+# Initialzie MAX_ATTEMPTS for any loop in the workflow
+MAX_ATTEMPTS = 2
 
 # Initialize the LLM model - switched to OpenAI GPT-4o-mini for better performance
 # model = ChatGroq(model="llama-3.1-8b-instant")  # Alternative: Groq Llama model
@@ -97,18 +99,17 @@ class SDLCState(TypedDict):
         code: Generated/modified code (updates with each iteration)
         code_review_response: Response from code review process
         security_review_response: Response from security review process
-        counter: Iteration counter to track code review cycles (NEW)
+        code_review_attempts: Iteration code_review_attempts to track code review cycles (NEW)
     """
 
     user_input_requirements: str  # Initial user requirements
-    auto_generated_user_stories_markdown: Annotated[
-        list[str], add_messages
-    ]  # User stories with message history
+    auto_generated_user_stories_markdown: Annotated[list[str], add_messages]
     design_docs: Annotated[list[str], add_messages]  # Design docs with message history
     code: str  # Generated/modified code
     code_review_response: str  # Code review feedback
     security_review_response: str  # Security review feedback
-    counter: int  # Iteration counter for review cycles
+    code_review_attempts: int
+    security_review_attempts: int
 
 
 # ===========================
@@ -240,30 +241,30 @@ def code_review(state: SDLCState) -> SDLCState:
 
     Reviews the generated/modified code for quality, best practices,
     potential bugs, and adherence to coding standards. Increments
-    the counter to track review iterations.
+    the code_review_attempts to track review iterations.
 
     Args:
         state: Current workflow state containing code to review
 
     Returns:
-        Updated state with code review response and incremented counter
+        Updated state with code review response and incremented code_review_attempts
 
     Process:
-        1. Increment the iteration counter
+        1. Increment the iteration code_review_attempts
         2. Extract code from state
         3. Create prompt for comprehensive code review
         4. Use structured LLM to get formatted feedback
         5. Return updated state with review results
 
     Note:
-        The counter increment happens before the review to ensure
+        The code_review_attempts increment happens before the review to ensure
         proper tracking of review attempts.
     """
     print("*" * 50)
     print("ENTERED CODE REVIEW")
 
-    # Increment counter to track review iterations
-    updated_counter = state["counter"] + 1
+    # Increment code_review_attempts to track review iterations
+    code_review_attempts = state["code_review_attempts"] + 1
 
     # Create prompt for comprehensive code review
     prompt = config.get_prompt("code_review", code=state["code"])
@@ -276,8 +277,11 @@ def code_review(state: SDLCState) -> SDLCState:
 
     print("EXITED CODE REVIEW")
 
-    # Return updated state with review response (counter already updated)
-    return {"code_review_response": response, "counter": updated_counter}
+    # Return updated state with review response and code_review_attempts
+    return {
+        "code_review_response": response,
+        "code_review_attempts": code_review_attempts,
+    }
 
 
 def fix_code_after_code_review(state: SDLCState) -> SDLCState:
@@ -303,7 +307,9 @@ def fix_code_after_code_review(state: SDLCState) -> SDLCState:
         6. Return updated state with fixed code
     """
     print("*" * 50)
-    print(f"ENTERED FIX CODE AFTER CODE REVIEW for {state['counter']} time")
+    print(
+        f"ENTERED FIX CODE AFTER CODE REVIEW for {state['code_review_attempts']} time"
+    )
 
     # Combine all feedback points into a comprehensive feedback string
     feedback = "\n\n".join(state["code_review_response"].feedback)
@@ -356,13 +362,21 @@ def security_review(state: SDLCState) -> SDLCState:
     print("*" * 50)
     print("ENTERED SECURITY REVIEW")
 
-    # TODO: Implement comprehensive security analysis
-    print("Security review functionality - placeholder implementation")
+    security_review_attempts = state["security_review_attempts"] + 1
+
+    prompt = config.get_prompt(
+        "security_review", code=state["code"], design_docs=state["design_docs"]
+    )
+
+    structured_llm = get_evaluator_schema(model)
+    response = structured_llm.invoke(prompt)
 
     print("EXITED SECURITY REVIEW")
 
-    # Return placeholder response (needs real implementation)
-    return {"security_review_response": "Security review completed - placeholder"}
+    return {
+        "security_review_response": response,
+        "security_review_attempts": security_review_attempts,
+    }
 
 
 # ===========================
@@ -379,22 +393,22 @@ def code_review_response(state: SDLCState) -> str:
     continue with code fixes, or force approval after max iterations.
 
     Args:
-        state: Current workflow state containing code review response and counter
+        state: Current workflow state containing code review response and code review attempts
 
     Returns:
         String indicating next step: "approved" or "feedback"
 
     Logic:
-        1. Check if iteration counter is within limit (≤ 5)
+        1. Check if iteration code_review_attempts is within limit (≤ MAX_ATTEMPTS)
         2. If within limit:
            - "approved" status → proceed to security review
            - "feedback" status → go to code fixing step
-        3. If limit exceeded (> 5):
+        3. If limit exceeded (> 2):
            - Force approval regardless of review status
            - Prevents infinite loops in review cycles
 
     Note:
-        The 5-iteration limit prevents endless review cycles while
+        The 2-iteration limit prevents endless review cycles while
         still allowing reasonable improvement attempts.
     """
     print("*" * 50)
@@ -404,12 +418,62 @@ def code_review_response(state: SDLCState) -> str:
     state_response = state["code_review_response"].status
 
     print(f"Code Review Response: {state_response}")
-    print(f"Current iteration count: {state['counter']}")
+    print(f"Current iteration count: {state['code_review_attempts']}")
 
     print("EXITED CODE REVIEW RESPONSE (CONDITION)")
 
     # Check iteration limit and determine routing
-    if state["counter"] < 2:
+    if state["code_review_attempts"] < MAX_ATTEMPTS:
+        if state_response == "approved":
+            return "approved"
+        else:
+            return "feedback"
+    else:
+        # Exceeded iteration limit - force approval to prevent infinite loops
+        print("⚠️  Maximum iterations (2) reached - forcing approval")
+        return "approved"  # Force route to security review
+
+
+def security_review_reponse(state: SDLCState) -> str:
+    """
+    Determine the next step based on security review results and iteration limit.
+
+    This conditional function examines the security review response and current
+    iteration count to decide whether to proceed to security review,
+    continue with code fixes, or force approval after max iterations.
+
+    Args:
+        state: Current workflow state containing security review response and security review attempts
+
+    Returns:
+        String indicating next step: "approved" or "feedback"
+
+    Logic:
+        1. Check if iteration code_review_attempts is within limit (≤ MAX_ATTEMPTS)
+        2. If within limit:
+           - "approved" status → proceed to security review
+           - "feedback" status → go to code fixing step
+        3. If limit exceeded (> 2):
+           - Force approval regardless of review status
+           - Prevents infinite loops in review cycles
+
+    Note:
+        The 2-iteration limit prevents endless review cycles while
+        still allowing reasonable improvement attempts.
+    """
+    print("*" * 50)
+    print("ENTERED CODE SECURITY RESPONSE (CONDITION)")
+
+    # Extract the status from the structured response
+    state_response = state["security_review_response"].status
+
+    print(f"Code Review Response: {state_response}")
+    print(f"Current iteration count: {state['security_review_attempts']}")
+
+    print("EXITED CODE REVIEW RESPONSE (CONDITION)")
+
+    # Check iteration limit and determine routing
+    if state["security_review_response"] < MAX_ATTEMPTS:
         if state_response == "approved":
             return "approved"
         else:
@@ -455,8 +519,14 @@ graph.add_conditional_edges(
 
 graph.add_edge("fix_code_after_code_review", "code_review")
 
-# Define terminal edge
-graph.add_edge("security_review", END)
+graph.add_conditional_edges(
+    "security_review",
+    security_review_reponse,
+    {"approved": "write_test_case", "feedback": "fix_code_after_security"},
+)
+
+graph.add_edge("write_test_case", END)
+graph.add_edge("fix_code_after_security", END)
 
 # Compile the workflow graph into executable workflow
 workflow = graph.compile()
@@ -497,7 +567,7 @@ if __name__ == "__main__":
     response = workflow.invoke(
         {
             "user_input_requirements": sample_requirements,
-            "counter": 0,
+            "code_review_attempts": 0,
         }
     )
 
