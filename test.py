@@ -108,10 +108,11 @@ class SDLCState(TypedDict):
     code: str  # Generated/modified code
     code_review_response: str  # Code review feedback
     security_review_response: str  # Security review feedback
-    code_review_attempts: int
-    security_review_attempts: int
     test_cases: str
     test_case_review_response: str
+    code_review_attempts: int
+    security_review_attempts: int
+    test_case_review_attempts: int
 
 
 # ===========================
@@ -400,11 +401,15 @@ def test_case_review(state: SDLCState) -> SDLCState:
         design_docs=state["design_docs"],
         test_cases=state["test_cases"],
     )
-    
+
     structured_llm = get_evaluator_schema(model=model)
     response = structured_llm.invoke(prompt)
 
     return {"test_case_review_response": response}
+
+
+def fix_test_cases_after_review(state: SDLCState) -> SDLCState:
+    pass
 
 
 # ===========================
@@ -412,7 +417,7 @@ def test_case_review(state: SDLCState) -> SDLCState:
 # ===========================
 
 
-def code_review_response(state: SDLCState) -> str:
+def code_review_conditional_response(state: SDLCState) -> str:
     """
     Determine the next step based on code review results and iteration limit.
 
@@ -462,7 +467,7 @@ def code_review_response(state: SDLCState) -> str:
         return "approved"  # Force route to security review
 
 
-def security_review_reponse(state: SDLCState) -> str:
+def security_review_conditional_reponse(state: SDLCState) -> str:
     """
     Determine the next step based on security review results and iteration limit.
 
@@ -501,7 +506,57 @@ def security_review_reponse(state: SDLCState) -> str:
     print("EXITED CODE REVIEW RESPONSE (CONDITION)")
 
     # Check iteration limit and determine routing
-    if state["security_review_response"] < MAX_ATTEMPTS:
+    if state["security_review_attempts"] < MAX_ATTEMPTS:
+        if state_response == "approved":
+            return "approved"
+        else:
+            return "feedback"
+    else:
+        # Exceeded iteration limit - force approval to prevent infinite loops
+        print("⚠️  Maximum iterations (2) reached - forcing approval")
+        return "approved"  # Force route to security review
+
+
+def test_case_review_conditional_reponse(state: SDLCState) -> str:
+    """
+    Determine the next step based on security review results and iteration limit.
+
+    This conditional function examines the security review response and current
+    iteration count to decide whether to proceed to security review,
+    continue with code fixes, or force approval after max iterations.
+
+    Args:
+        state: Current workflow state containing security review response and security review attempts
+
+    Returns:
+        String indicating next step: "approved" or "feedback"
+
+    Logic:
+        1. Check if iteration code_review_attempts is within limit (≤ MAX_ATTEMPTS)
+        2. If within limit:
+           - "approved" status → proceed to security review
+           - "feedback" status → go to code fixing step
+        3. If limit exceeded (> 2):
+           - Force approval regardless of review status
+           - Prevents infinite loops in review cycles
+
+    Note:
+        The 2-iteration limit prevents endless review cycles while
+        still allowing reasonable improvement attempts.
+    """
+    print("*" * 50)
+    print("ENTERED TEST CASE REVIEW (CONDITION)")
+
+    # Extract the status from the structured response
+    state_response = state["test_case_review_response"].status
+
+    print(f"Code Review Response: {state_response}")
+    print(f"Current iteration count: {state['test_case_review_attempts']}")
+
+    print("EXITED TEST CASE REVIEW (CONDITION)")
+
+    # Check iteration limit and determine routing
+    if state["test_case_review_attempts"] < MAX_ATTEMPTS:
         if state_response == "approved":
             return "approved"
         else:
@@ -527,6 +582,8 @@ graph.add_node("code_review", code_review)
 graph.add_node("fix_code_after_code_review", fix_code_after_code_review)
 graph.add_node("security_review", security_review)
 graph.add_node("write_test_case", write_test_case)
+graph.add_node("test_case_review", test_case_review)
+graph.add_node("fix_test_cases_after_review", fix_test_cases_after_review)
 
 # Define the sequential workflow edges
 graph.add_edge(START, "auto_generated_user_stories")
@@ -539,7 +596,7 @@ graph.add_edge("generate_code", "code_review")
 # Add conditional edge based on code review results
 graph.add_conditional_edges(
     "code_review",
-    code_review_response,
+    code_review_conditional_response,
     {
         "approved": "security_review",
         "feedback": "fix_code_after_code_review",
@@ -550,12 +607,21 @@ graph.add_edge("fix_code_after_code_review", "code_review")
 
 graph.add_conditional_edges(
     "security_review",
-    security_review_reponse,
+    security_review_conditional_reponse,
     {"approved": "write_test_case", "feedback": "fix_code_after_security"},
 )
 
 graph.add_edge("fix_code_after_security", "security_review")
-graph.add_edge("write_test_case", END)
+graph.add_edge("write_test_case", "test_case_review")
+graph.add_conditional_edges(
+    "test_case_review",
+    test_case_review_conditional_reponse,
+    {"approved": "qa_testing", "feedback": "fix_test_cases_after_review"},
+)
+
+graph.add_edge("fix_test_cases_after_review", "write_test_case")
+
+graph.add_edge("qa_testing", END)
 
 # Compile the workflow graph into executable workflow
 workflow = graph.compile()
