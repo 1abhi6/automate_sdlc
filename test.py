@@ -102,17 +102,20 @@ class SDLCState(TypedDict):
         code_review_attempts: Iteration code_review_attempts to track code review cycles (NEW)
     """
 
-    user_input_requirements: str  # Initial user requirements
+    user_input_requirements: str
     auto_generated_user_stories_markdown: Annotated[list[str], add_messages]
-    design_docs: Annotated[list[str], add_messages]  # Design docs with message history
-    code: str  # Generated/modified code
-    code_review_response: str  # Code review feedback
-    security_review_response: str  # Security review feedback
+    design_docs: Annotated[list[str], add_messages]
+    code: str
+    code_review_response: str
+    security_review_response: str
     test_cases: str
     test_case_review_response: str
+    qa_testing_response: str
+    deployment: str
     code_review_attempts: int
     security_review_attempts: int
     test_case_review_attempts: int
+    qa_testing_attempts: int
 
 
 # ===========================
@@ -395,6 +398,8 @@ def write_test_case(state: SDLCState) -> SDLCState:
 
 
 def test_case_review(state: SDLCState) -> SDLCState:
+    test_case_review_attempts = state["test_case_review_attempts"] + 1
+
     prompt = config.get_prompt(
         "test_case_review",
         code=state["code"],
@@ -405,7 +410,10 @@ def test_case_review(state: SDLCState) -> SDLCState:
     structured_llm = get_evaluator_schema(model=model)
     response = structured_llm.invoke(prompt)
 
-    return {"test_case_review_response": response}
+    return {
+        "test_case_review_response": response,
+        "test_case_review_attempts": test_case_review_attempts,
+    }
 
 
 def fix_test_cases_after_review(state: SDLCState) -> SDLCState:
@@ -422,6 +430,43 @@ def fix_test_cases_after_review(state: SDLCState) -> SDLCState:
     response = fix_test_cases_after_review_chain.invoke(prompt)
 
     return {"test_cases": response}
+
+
+def qa_testing(state: SDLCState) -> SDLCState:
+    qa_testing_attempts = state["qa_testing_attempts"] + 1
+
+    prompt = config.get_prompt(
+        "qa_testing",
+        code=state["code"],
+        test_cases=state["test_cases"],
+        design_docs=state["design_docs"],
+    )
+
+    structured_model = get_evaluator_schema(model)
+    response = structured_model.invoke(prompt)
+
+    return {"qa_testing_response": response, "qa_testing_attempts": qa_testing_attempts}
+
+
+def fix_code_after_qa_feedback(state: SDLCState) -> SDLCState:
+    prompt = config.get_prompt(
+        "fix_code_after_qa_feedback",
+        code=state["code"],
+        test_cases=state["test_cases"],
+        design_docs=state["design_docs"],
+        qa_testing_response=state["qa_testing_response"].status,
+    )
+
+    fix_code_after_qa_feedback_chain = model | StrOutputParser()
+
+    response = fix_code_after_qa_feedback_chain.invoke(prompt)
+
+    return {"code": response}
+
+
+def deployment(state: SDLCState) -> str:
+    print("I AM DEPLOYED BRO!")
+    return {"deployment": "MAI DEPLOY HOGYA DOSTON!!"}
 
 
 # ===========================
@@ -579,6 +624,30 @@ def test_case_review_conditional_reponse(state: SDLCState) -> str:
         return "approved"  # Force route to security review
 
 
+def qa_testing_conditional_reponse(state: SDLCState) -> str:
+    print("*" * 50)
+    print("ENTERED TEST CASE REVIEW (CONDITION)")
+
+    # Extract the status from the structured response
+    state_response = state["qa_testing_response"].status
+
+    print(f"Code Review Response: {state_response}")
+    print(f"Current iteration count: {state['qa_testing_attempts']}")
+
+    print("EXITED TEST CASE REVIEW (CONDITION)")
+
+    # Check iteration limit and determine routing
+    if state["qa_testing_attempts"] < MAX_ATTEMPTS:
+        if state_response == "approved":
+            return "approved"
+        else:
+            return "feedback"
+    else:
+        # Exceeded iteration limit - force approval to prevent infinite loops
+        print("⚠️  Maximum iterations (2) reached - forcing approval")
+        return "approved"  # Force route to security review
+
+
 # ===========================
 # WORKFLOW GRAPH CONSTRUCTION
 # ===========================
@@ -596,6 +665,9 @@ graph.add_node("security_review", security_review)
 graph.add_node("write_test_case", write_test_case)
 graph.add_node("test_case_review", test_case_review)
 graph.add_node("fix_test_cases_after_review", fix_test_cases_after_review)
+graph.add_node("qa_testing", qa_testing)
+graph.add_node("fix_code_after_qa_feedback", fix_code_after_qa_feedback)
+graph.add_node("deployment", deployment)
 
 # Define the sequential workflow edges
 graph.add_edge(START, "auto_generated_user_stories")
@@ -633,8 +705,14 @@ graph.add_conditional_edges(
 
 graph.add_edge("fix_test_cases_after_review", "write_test_case")
 
-graph.add_edge("qa_testing", END)
+graph.add_conditional_edges(
+    "qa_testing",
+    qa_testing_conditional_reponse,
+    {"approved": "deployment", "feedback": "fix_code_after_qa_feedback"},
+)
 
+graph.add_edge("fix_code_after_qa_feedback", "qa_testing")
+graph.add_edge("deployment", END)
 # Compile the workflow graph into executable workflow
 workflow = graph.compile()
 
@@ -683,3 +761,6 @@ if __name__ == "__main__":
     print("=" * 60)
     print("Final Response:")
     print(response)
+    
+    
+    

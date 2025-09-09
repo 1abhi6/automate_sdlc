@@ -12,14 +12,12 @@ Improving Efficiency
 1. Send JSON only to LLM for generating outputs
 
 
-
 Timeline:
 1. Jupyter Notebook (7 Sept)
 2. APIs (13 Sept)
 3. Deployment (13 Sept)
 4. Frontend (1 week or 10 Days)
 5. Improvements 
-
 
 
 
