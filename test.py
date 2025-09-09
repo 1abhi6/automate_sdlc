@@ -36,8 +36,8 @@ config = PromptConfig()
 # Initialzie MAX_ATTEMPTS for any loop in the workflow
 MAX_ATTEMPTS = 2
 
-# Initialize the LLM model - switched to OpenAI GPT-4o-mini for better performance
-# model = ChatGroq(model="llama-3.1-8b-instant")  # Alternative: Groq Llama model
+# Initialize the LLM model
+# model = ChatGroq(model="llama-3.1-8b-instant")
 model = ChatOpenAI(model="gpt-4o-mini")
 
 
@@ -110,6 +110,8 @@ class SDLCState(TypedDict):
     security_review_response: str  # Security review feedback
     code_review_attempts: int
     security_review_attempts: int
+    test_cases: str
+    test_case_review_response: str
 
 
 # ===========================
@@ -379,6 +381,32 @@ def security_review(state: SDLCState) -> SDLCState:
     }
 
 
+def write_test_case(state: SDLCState) -> SDLCState:
+    prompt = config.get_prompt(
+        "write_test_case", code=state["code"], desgin_docs=state["design_docs"]
+    )
+
+    write_test_case_chain = model | StrOutputParser()
+
+    response = write_test_case_chain.invoke(prompt)
+
+    return {"test_cases": response}
+
+
+def test_case_review(state: SDLCState) -> SDLCState:
+    prompt = config.get_prompt(
+        "test_case_review",
+        code=state["code"],
+        design_docs=state["design_docs"],
+        test_cases=state["test_cases"],
+    )
+    
+    structured_llm = get_evaluator_schema(model=model)
+    response = structured_llm.invoke(prompt)
+
+    return {"test_case_review_response": response}
+
+
 # ===========================
 # CONDITIONAL FUNCTIONS
 # ===========================
@@ -498,6 +526,7 @@ graph.add_node("generate_code", generate_code)
 graph.add_node("code_review", code_review)
 graph.add_node("fix_code_after_code_review", fix_code_after_code_review)
 graph.add_node("security_review", security_review)
+graph.add_node("write_test_case", write_test_case)
 
 # Define the sequential workflow edges
 graph.add_edge(START, "auto_generated_user_stories")
@@ -525,8 +554,8 @@ graph.add_conditional_edges(
     {"approved": "write_test_case", "feedback": "fix_code_after_security"},
 )
 
+graph.add_edge("fix_code_after_security", "security_review")
 graph.add_edge("write_test_case", END)
-graph.add_edge("fix_code_after_security", END)
 
 # Compile the workflow graph into executable workflow
 workflow = graph.compile()
