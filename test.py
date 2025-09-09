@@ -409,7 +409,19 @@ def test_case_review(state: SDLCState) -> SDLCState:
 
 
 def fix_test_cases_after_review(state: SDLCState) -> SDLCState:
-    pass
+    prompt = config.get_prompt(
+        "fix_code_after_code_review",
+        code=state["code"],
+        design_docs=state["design_docs"],
+        test_cases=state["test_cases"],
+        test_case_review_response=state["test_case_review_response"],
+    )
+
+    fix_test_cases_after_review_chain = model | StrOutputParser()
+
+    response = fix_test_cases_after_review_chain.invoke(prompt)
+
+    return {"test_cases": response}
 
 
 # ===========================
